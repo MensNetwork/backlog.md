@@ -17,6 +17,7 @@ interface Props {
   onSaved?: () => Promise<void> | void; // refresh callback
   onSubmit?: (taskData: Partial<Task>) => Promise<void>; // For creating new tasks
   onArchive?: () => void; // For archiving tasks
+  onNavigateToTask?: (taskId: string) => void; // Navigate to a different task (parent/subtask)
   availableStatuses?: string[]; // Available statuses for new tasks
   isDraftMode?: boolean; // Whether creating a draft
   availableMilestones?: string[];
@@ -55,6 +56,7 @@ export const TaskDetailsModal: React.FC<Props> = ({
   onSaved,
   onSubmit,
   onArchive,
+  onNavigateToTask,
   availableStatuses,
   availableMilestones: _availableMilestones,
   milestoneEntities,
@@ -1050,6 +1052,56 @@ export const TaskDetailsModal: React.FC<Props> = ({
               disabled={isFromOtherBranch}
             />
           </div>
+
+          {/* Parent Task */}
+          {task?.parentTaskId && (
+            <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-3">
+              <SectionHeader title="Parent Task" />
+              <button
+                type="button"
+                onClick={() => onNavigateToTask?.(task.parentTaskId!)}
+                className="w-full text-left text-sm text-blue-600 dark:text-blue-400 hover:underline flex items-center gap-2"
+                title={`Navigate to parent task ${task.parentTaskId}`}
+              >
+                <svg className="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 11l5-5m0 0l5 5m-5-5v12" />
+                </svg>
+                <span className="truncate">
+                  <span className="font-mono text-xs text-gray-500 dark:text-gray-400">{task.parentTaskId}</span>
+                  {task.parentTaskTitle && (
+                    <span className="ml-1">{task.parentTaskTitle}</span>
+                  )}
+                </span>
+              </button>
+            </div>
+          )}
+
+          {/* Subtasks */}
+          {task?.subtaskSummaries && task.subtaskSummaries.length > 0 && (
+            <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-3">
+              <SectionHeader title={`Subtasks (${task.subtaskSummaries.length})`} />
+              <ul className="space-y-1.5">
+                {task.subtaskSummaries.map((subtask) => (
+                  <li key={subtask.id}>
+                    <button
+                      type="button"
+                      onClick={() => onNavigateToTask?.(subtask.id)}
+                      className="w-full text-left text-sm text-blue-600 dark:text-blue-400 hover:underline flex items-center gap-2"
+                      title={`Navigate to subtask ${subtask.id}`}
+                    >
+                      <svg className="w-3.5 h-3.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 13l-5 5m0 0l-5-5m5 5V6" />
+                      </svg>
+                      <span className="truncate">
+                        <span className="font-mono text-xs text-gray-500 dark:text-gray-400">{subtask.id}</span>
+                        <span className="ml-1">{subtask.title}</span>
+                      </span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
 
           {/* Archive button at bottom of sidebar */}
 		          {task && onArchive && !isFromOtherBranch && (

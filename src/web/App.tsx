@@ -375,6 +375,22 @@ function App() {
     setShowModal(true);
   };
 
+  const handleNavigateToTask = useCallback(async (taskId: string) => {
+    try {
+      const task = await apiClient.fetchTask(taskId);
+      setEditingTask(task);
+      setShowModal(true);
+    } catch (error) {
+      console.error('Failed to navigate to task:', error);
+      // Try finding it in the local tasks array as fallback
+      const localTask = tasks.find(t => t.id === taskId);
+      if (localTask) {
+        setEditingTask(localTask);
+        setShowModal(true);
+      }
+    }
+  }, [tasks]);
+
   const handleCloseModal = () => {
     setShowModal(false);
     setEditingTask(null);
@@ -552,6 +568,7 @@ function App() {
           onSaved={refreshData}
           onSubmit={handleSubmitTask}
           onArchive={editingTask ? () => handleArchiveTask(editingTask.id) : undefined}
+          onNavigateToTask={handleNavigateToTask}
           availableStatuses={isDraftMode ? ['Draft', ...statuses] : statuses}
           availableMilestones={milestones}
           milestoneEntities={milestoneEntities}
