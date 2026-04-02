@@ -28,6 +28,7 @@ import { apiClient } from './lib/api';
 import { useHealthCheckContext } from './contexts/HealthCheckContext';
 import { getWebVersion } from './utils/version';
 import { collectArchivedMilestoneKeys, collectMilestoneIds, milestoneKey } from './utils/milestones';
+import { navigateToTask } from './utils/navigate-to-task';
 
 const buildMilestoneAliasMap = (milestones: Milestone[], archivedMilestones: Milestone[]): Map<string, string> => {
   const aliasMap = new Map<string, string>();
@@ -186,6 +187,7 @@ function App() {
   const { isOnline } = useHealthCheckContext();
   const previousOnlineRef = useRef<boolean | null>(null);
   const hasBeenRunningRef = useRef(false);
+  const isFreshFetchRef = useRef(false);
 
   // Set version data attribute on body
   React.useEffect(() => {
@@ -375,6 +377,22 @@ function App() {
     setShowModal(true);
   };
 
+  const [isNavigating, setIsNavigating] = useState(false);
+  const [navigationError, setNavigationError] = useState<string | null>(null);
+
+  const handleNavigateToTask = useCallback(async (taskId: string) => {
+    if (isNavigating) return;
+    await navigateToTask(taskId, {
+      fetchTask: apiClient.fetchTask,
+      localTasks: tasks,
+      setEditingTask,
+      setShowModal,
+      setNavigationError,
+      setIsNavigating,
+      setIsFreshFetch: (v: boolean) => { isFreshFetchRef.current = v; },
+    });
+  }, [tasks, isNavigating]);
+
   const handleCloseModal = () => {
     setShowModal(false);
     setEditingTask(null);
@@ -388,6 +406,10 @@ function App() {
   // Sync editingTask with refreshed tasks data to prevent stale state
   // This fixes the bug where acceptance criteria disappears after save (GitHub #467)
   useEffect(() => {
+    if (isFreshFetchRef.current) {
+      isFreshFetchRef.current = false;
+      return; // Don't overwrite the freshly fetched task from handleNavigateToTask
+    }
     if (editingTask && showModal) {
       const updatedTask = tasks.find(t => t.id === editingTask.id);
       if (updatedTask && updatedTask !== editingTask) {
@@ -552,6 +574,7 @@ function App() {
           onSaved={refreshData}
           onSubmit={handleSubmitTask}
           onArchive={editingTask ? () => handleArchiveTask(editingTask.id) : undefined}
+          onNavigateToTask={handleNavigateToTask}
           availableStatuses={isDraftMode ? ['Draft', ...statuses] : statuses}
           availableMilestones={milestones}
           milestoneEntities={milestoneEntities}
@@ -568,6 +591,18 @@ function App() {
             icon={
               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+            }
+          />
+        )}
+        {/* Navigation Error Toast */}
+        {navigationError && (
+          <SuccessToast
+            message={navigationError}
+            onDismiss={() => setNavigationError(null)}
+            icon={
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
               </svg>
             }
           />
