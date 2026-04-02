@@ -305,6 +305,14 @@ export const TaskDetailsModal: React.FC<Props> = ({
     apiClient.fetchTasks().then(setAvailableTasks).catch(() => setAvailableTasks([]));
   }, [task, isOpen, isCreateMode, isDraftMode, availableStatuses, defaultDefinitionOfDone]);
 
+  const handleTaskNavigation = (targetTaskId: string) => {
+    if ((mode === "edit" || mode === "create") && isDirty) {
+      const confirmNavigate = window.confirm("Discard unsaved changes and navigate?");
+      if (!confirmNavigate) return;
+    }
+    onNavigateToTask?.(targetTaskId);
+  };
+
   const handleCancelEdit = () => {
     if (isDirty) {
       const confirmDiscard = window.confirm("Discard unsaved changes?");
@@ -1059,7 +1067,7 @@ export const TaskDetailsModal: React.FC<Props> = ({
               <SectionHeader title="Parent Task" />
               <button
                 type="button"
-                onClick={() => task.parentTaskId && onNavigateToTask?.(task.parentTaskId)}
+                onClick={() => task.parentTaskId && handleTaskNavigation(task.parentTaskId)}
                 className="w-full text-left text-sm text-blue-600 dark:text-blue-400 hover:underline flex items-center gap-2"
                 title={`Navigate to parent task ${task.parentTaskId}`}
                 aria-label={`Navigate to parent task ${task.parentTaskId}`}
@@ -1086,7 +1094,7 @@ export const TaskDetailsModal: React.FC<Props> = ({
                   <li key={subtask.id}>
                     <button
                       type="button"
-                      onClick={() => onNavigateToTask?.(subtask.id)}
+                      onClick={() => handleTaskNavigation(subtask.id)}
                       className="w-full text-left text-sm text-blue-600 dark:text-blue-400 hover:underline flex items-center gap-2"
                       title={`Navigate to subtask ${subtask.id}`}
                       aria-label={`Navigate to subtask ${subtask.id}`}
