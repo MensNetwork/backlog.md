@@ -375,21 +375,31 @@ function App() {
     setShowModal(true);
   };
 
+  const [isNavigating, setIsNavigating] = useState(false);
+  const [navigationError, setNavigationError] = useState<string | null>(null);
+
   const handleNavigateToTask = useCallback(async (taskId: string) => {
+    if (isNavigating) return;
+    setIsNavigating(true);
+    setNavigationError(null);
     try {
       const task = await apiClient.fetchTask(taskId);
       setEditingTask(task);
       setShowModal(true);
-    } catch (error) {
-      console.error('Failed to navigate to task:', error);
+    } catch {
       // Try finding it in the local tasks array as fallback
       const localTask = tasks.find(t => t.id === taskId);
       if (localTask) {
         setEditingTask(localTask);
         setShowModal(true);
+      } else {
+        setNavigationError(`Could not load task ${taskId}`);
+        setTimeout(() => setNavigationError(null), 4000);
       }
+    } finally {
+      setIsNavigating(false);
     }
-  }, [tasks]);
+  }, [tasks, isNavigating]);
 
   const handleCloseModal = () => {
     setShowModal(false);
@@ -585,6 +595,18 @@ function App() {
             icon={
               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+            }
+          />
+        )}
+        {/* Navigation Error Toast */}
+        {navigationError && (
+          <SuccessToast
+            message={navigationError}
+            onDismiss={() => setNavigationError(null)}
+            icon={
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
               </svg>
             }
           />

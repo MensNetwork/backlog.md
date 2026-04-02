@@ -1059,11 +1059,12 @@ export const TaskDetailsModal: React.FC<Props> = ({
               <SectionHeader title="Parent Task" />
               <button
                 type="button"
-                onClick={() => onNavigateToTask?.(task.parentTaskId!)}
+                onClick={() => task.parentTaskId && onNavigateToTask?.(task.parentTaskId)}
                 className="w-full text-left text-sm text-blue-600 dark:text-blue-400 hover:underline flex items-center gap-2"
                 title={`Navigate to parent task ${task.parentTaskId}`}
+                aria-label={`Navigate to parent task ${task.parentTaskId}`}
               >
-                <svg className="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <svg className="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 11l5-5m0 0l5 5m-5-5v12" />
                 </svg>
                 <span className="truncate">
@@ -1088,8 +1089,9 @@ export const TaskDetailsModal: React.FC<Props> = ({
                       onClick={() => onNavigateToTask?.(subtask.id)}
                       className="w-full text-left text-sm text-blue-600 dark:text-blue-400 hover:underline flex items-center gap-2"
                       title={`Navigate to subtask ${subtask.id}`}
+                      aria-label={`Navigate to subtask ${subtask.id}`}
                     >
-                      <svg className="w-3.5 h-3.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <svg className="w-3.5 h-3.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 13l-5 5m0 0l-5-5m5 5V6" />
                       </svg>
                       <span className="truncate">
