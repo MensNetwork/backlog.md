@@ -28,6 +28,7 @@ import { apiClient } from './lib/api';
 import { useHealthCheckContext } from './contexts/HealthCheckContext';
 import { getWebVersion } from './utils/version';
 import { collectArchivedMilestoneKeys, collectMilestoneIds, milestoneKey } from './utils/milestones';
+import { navigateToTask } from './utils/navigate-to-task';
 
 const buildMilestoneAliasMap = (milestones: Milestone[], archivedMilestones: Milestone[]): Map<string, string> => {
   const aliasMap = new Map<string, string>();
@@ -186,6 +187,7 @@ function App() {
   const { isOnline } = useHealthCheckContext();
   const previousOnlineRef = useRef<boolean | null>(null);
   const hasBeenRunningRef = useRef(false);
+  const isFreshFetchRef = useRef(false);
 
   // Set version data attribute on body
   React.useEffect(() => {
@@ -380,25 +382,15 @@ function App() {
 
   const handleNavigateToTask = useCallback(async (taskId: string) => {
     if (isNavigating) return;
-    setIsNavigating(true);
-    setNavigationError(null);
-    try {
-      const task = await apiClient.fetchTask(taskId);
-      setEditingTask(task);
-      setShowModal(true);
-    } catch {
-      // Try finding it in the local tasks array as fallback
-      const localTask = tasks.find(t => t.id === taskId);
-      if (localTask) {
-        setEditingTask(localTask);
-        setShowModal(true);
-      } else {
-        setNavigationError(`Could not load task ${taskId}`);
-        setTimeout(() => setNavigationError(null), 4000);
-      }
-    } finally {
-      setIsNavigating(false);
-    }
+    await navigateToTask(taskId, {
+      fetchTask: apiClient.fetchTask,
+      localTasks: tasks,
+      setEditingTask,
+      setShowModal,
+      setNavigationError,
+      setIsNavigating,
+      setIsFreshFetch: (v: boolean) => { isFreshFetchRef.current = v; },
+    });
   }, [tasks, isNavigating]);
 
   const handleCloseModal = () => {
@@ -414,6 +406,10 @@ function App() {
   // Sync editingTask with refreshed tasks data to prevent stale state
   // This fixes the bug where acceptance criteria disappears after save (GitHub #467)
   useEffect(() => {
+    if (isFreshFetchRef.current) {
+      isFreshFetchRef.current = false;
+      return; // Don't overwrite the freshly fetched task from handleNavigateToTask
+    }
     if (editingTask && showModal) {
       const updatedTask = tasks.find(t => t.id === editingTask.id);
       if (updatedTask && updatedTask !== editingTask) {
