@@ -3,6 +3,7 @@ import { type Milestone, type Task } from '../../types';
 import { apiClient, type ReorderTaskPayload } from '../lib/api';
 import { buildLanes, DEFAULT_LANE_KEY, groupTasksByLaneAndStatus, type LaneMode } from '../lib/lanes';
 import { collectArchivedMilestoneKeys, milestoneKey } from '../utils/milestones';
+import { collectAvailableLabels } from '../../utils/label-filter';
 import TaskColumn from './TaskColumn';
 import CleanupModal from './CleanupModal';
 import { SuccessToast } from './SuccessToast';
@@ -21,6 +22,7 @@ interface BoardProps {
   laneMode: LaneMode;
   onLaneChange: (mode: LaneMode) => void;
   milestoneFilter?: string | null;
+  availableLabels?: string[];
 }
 
 const Board: React.FC<BoardProps> = ({
@@ -36,11 +38,13 @@ const Board: React.FC<BoardProps> = ({
   laneMode,
   onLaneChange,
   milestoneFilter,
+  availableLabels = [],
 }) => {
   const [updateError, setUpdateError] = useState<string | null>(null);
   const [dragSourceStatus, setDragSourceStatus] = useState<string | null>(null);
   const [dragSourceLane, setDragSourceLane] = useState<string | null>(null);
   const [showCleanupModal, setShowCleanupModal] = useState(false);
+  const [labelFilter, setLabelFilter] = useState<string[]>([]);
   const [cleanupSuccessMessage, setCleanupSuccessMessage] = useState<string | null>(null);
   const [collapsedLanes, setCollapsedLanes] = useState<Record<string, boolean>>({});
   const archivedMilestoneIds = useMemo(
@@ -179,11 +183,22 @@ const Board: React.FC<BoardProps> = ({
   };
   const canonicalMilestoneFilter = canonicalizeMilestone(milestoneFilter);
 
-  // Filter tasks by milestone when milestoneFilter is set
+  const mergedLabels = useMemo(
+    () => collectAvailableLabels(tasks, availableLabels),
+    [tasks, availableLabels],
+  );
+
+  // Filter tasks by milestone and labels
   const filteredTasks = useMemo(() => {
-    if (!milestoneFilter) return tasks;
-    return tasks.filter(task => canonicalizeMilestone(task.milestone) === canonicalMilestoneFilter);
-  }, [tasks, milestoneFilter, canonicalMilestoneFilter, milestoneAliasToCanonical]);
+    let result = tasks;
+    if (milestoneFilter) {
+      result = result.filter(task => canonicalizeMilestone(task.milestone) === canonicalMilestoneFilter);
+    }
+    if (labelFilter.length > 0) {
+      result = result.filter(task => labelFilter.every(lf => task.labels.includes(lf)));
+    }
+    return result;
+  }, [tasks, milestoneFilter, canonicalMilestoneFilter, milestoneAliasToCanonical, labelFilter]);
 
   // Handle highlighting a task (opening its edit popup)
   useEffect(() => {
@@ -418,6 +433,46 @@ const Board: React.FC<BoardProps> = ({
 	          + New Task
         </button>
       </div>
+
+      {/* Label filter bar */}
+      {mergedLabels.length > 0 && (
+        <div className="flex flex-wrap items-center gap-2 mb-4">
+          <span className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Labels:</span>
+          {mergedLabels.map((label) => {
+            const active = labelFilter.includes(label);
+            return (
+              <button
+                key={label}
+                type="button"
+                onClick={() =>
+                  setLabelFilter((prev) =>
+                    active ? prev.filter((l) => l !== label) : [...prev, label],
+                  )
+                }
+                className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-circle text-xs font-medium transition-colors ${
+                  active
+                    ? "bg-blue-600 text-white dark:bg-blue-500"
+                    : "bg-gray-100 text-gray-700 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600"
+                }`}
+              >
+                {label}
+                {active && (
+                  <span className="ml-0.5 text-blue-200" aria-hidden="true">×</span>
+                )}
+              </button>
+            );
+          })}
+          {labelFilter.length > 0 && (
+            <button
+              type="button"
+              onClick={() => setLabelFilter([])}
+              className="text-xs text-blue-600 dark:text-blue-400 hover:underline ml-1"
+            >
+              Clear
+            </button>
+          )}
+        </div>
+      )}
 
       {laneMode === 'milestone' ? (
         <div className="space-y-6">

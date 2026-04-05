@@ -35,6 +35,31 @@ const TaskColumn: React.FC<TaskColumnProps> = ({
   const [isDragOver, setIsDragOver] = React.useState(false);
   const [draggedTaskId, setDraggedTaskId] = React.useState<string | null>(null);
   const [dropPosition, setDropPosition] = React.useState<{ index: number; position: 'before' | 'after' } | null>(null);
+
+  // Reorder tasks so subtasks appear under their parent within the column
+  const orderedTasks = React.useMemo(() => {
+    const taskMap = new Map(tasks.map((t) => [t.id, t]));
+    const result: Array<{ task: typeof tasks[0]; isSubtask: boolean }> = [];
+    const added = new Set<string>();
+    for (const task of tasks) {
+      if (added.has(task.id)) continue;
+      if (task.parentTaskId && taskMap.has(task.parentTaskId)) continue;
+      result.push({ task, isSubtask: false });
+      added.add(task.id);
+      for (const sub of task.subtaskSummaries ?? []) {
+        if (taskMap.has(sub.id) && !added.has(sub.id)) {
+          result.push({ task: taskMap.get(sub.id)!, isSubtask: true });
+          added.add(sub.id);
+        }
+      }
+    }
+    for (const task of tasks) {
+      if (!added.has(task.id)) {
+        result.push({ task, isSubtask: Boolean(task.parentTaskId) });
+      }
+    }
+    return result;
+  }, [tasks]);
   const getStatusBadgeClass = (status: string) => {
     const statusLower = status.toLowerCase();
     if (statusLower.includes('done') || statusLower.includes('complete')) {
@@ -63,15 +88,16 @@ const TaskColumn: React.FC<TaskColumnProps> = ({
       return;
     }
 
-    const columnWithoutDropped = tasks.filter((task) => task.id !== droppedTaskId);
+    const flatOrdered = orderedTasks.map(({ task }) => task);
+    const columnWithoutDropped = flatOrdered.filter((task) => task.id !== droppedTaskId);
 
     let insertIndex = columnWithoutDropped.length;
     if (dropPosition) {
       const { index, position } = dropPosition;
       const baseIndex = position === 'before' ? index : index + 1;
       let count = 0;
-      for (let i = 0; i < Math.min(baseIndex, tasks.length); i += 1) {
-        if (tasks[i]?.id === droppedTaskId) {
+      for (let i = 0; i < Math.min(baseIndex, flatOrdered.length); i += 1) {
+        if (flatOrdered[i]?.id === droppedTaskId) {
           continue;
         }
         count += 1;
@@ -86,7 +112,7 @@ const TaskColumn: React.FC<TaskColumnProps> = ({
     const isOrderUnchanged =
       isSameColumn &&
       orderedTaskIds.length === tasks.length &&
-      orderedTaskIds.every((taskId, idx) => taskId === tasks[idx]?.id);
+      orderedTaskIds.every((taskId, idx) => taskId === flatOrdered[idx]?.id);
 
     if (isOrderUnchanged) {
       return;
@@ -151,18 +177,18 @@ const TaskColumn: React.FC<TaskColumnProps> = ({
       </div>
       
       <div className="space-y-3">
-        {tasks.map((task, index) => (
-          <div 
-            key={task.id} 
-            className="relative"
+        {orderedTasks.map(({ task, isSubtask }, index) => (
+          <div
+            key={task.id}
+            className={`relative ${isSubtask ? "ml-4 pl-2 border-l-2 border-gray-200 dark:border-gray-600" : ""}`}
             onDragOver={(e) => {
               if (!onTaskReorder || !draggedTaskId || draggedTaskId === task.id) return;
-              
+
               e.preventDefault();
               const rect = e.currentTarget.getBoundingClientRect();
               const y = e.clientY - rect.top;
               const height = rect.height;
-              
+
               // Determine if we're in the top or bottom half
               if (y < height / 2) {
                 setDropPosition({ index, position: 'before' });
@@ -175,7 +201,7 @@ const TaskColumn: React.FC<TaskColumnProps> = ({
             {dropPosition?.index === index && dropPosition.position === 'before' && (
               <div className="h-1 bg-blue-500 rounded-full mb-2 animate-pulse" />
             )}
-            
+
             <TaskCard
               task={task}
               onUpdate={onTaskUpdate}
@@ -192,7 +218,7 @@ const TaskColumn: React.FC<TaskColumnProps> = ({
               status={title}
               laneId={laneId}
             />
-            
+
             {/* Drop indicator for after this task */}
             {dropPosition?.index === index && dropPosition.position === 'after' && (
               <div className="h-1 bg-blue-500 rounded-full mt-2 animate-pulse" />
