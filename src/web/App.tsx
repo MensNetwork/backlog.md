@@ -524,6 +524,7 @@ function App() {
                 milestoneEntities={milestoneEntities}
                 archivedMilestones={archivedMilestones}
                 isLoading={isLoading}
+                availableLabels={availableLabels}
               />
             }
           />

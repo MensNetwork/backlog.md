@@ -41,6 +41,8 @@ const PRIORITY_RANK: Record<string, number> = {
 	low: 1,
 };
 
+const INACTIVE_STATUSES = new Set(["done", "cancelled", "parked"]);
+
 function extractTaskNumericId(taskId: string): number | null {
 	const match = taskId.trim().match(/(\d+)$/);
 	if (!match?.[1]) return null;
@@ -83,7 +85,7 @@ const TaskList: React.FC<TaskListProps> = ({
 	tasks,
 	availableStatuses,
 	availableLabels,
-	availableMilestones,
+	availableMilestones: _availableMilestones,
 	milestoneEntities,
 	archivedMilestones,
 	onRefreshData,
@@ -109,6 +111,8 @@ const TaskList: React.FC<TaskListProps> = ({
 	const [showLabelsMenu, setShowLabelsMenu] = useState(false);
 	const [sortColumn, setSortColumn] = useState<TaskSortColumn>("id");
 	const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
+	const [showActiveOnly, setShowActiveOnly] = useState(true);
+	const [collapsedParents, setCollapsedParents] = useState<Set<string>>(new Set());
 	const labelsButtonRef = useRef<HTMLButtonElement | null>(null);
 	const labelsMenuRef = useRef<HTMLDivElement | null>(null);
 	const tableHeaderScrollRef = useRef<HTMLDivElement | null>(null);
@@ -252,10 +256,18 @@ const TaskList: React.FC<TaskListProps> = ({
 		() => sortLabelsByGroup(collectAvailableLabels(tasks, availableLabels)),
 		[tasks, availableLabels],
 	);
-	const milestoneOptions = useMemo(() => {
-		const uniqueMilestones = Array.from(new Set([...availableMilestones.map((m) => m.trim()).filter(Boolean)]));
-		return uniqueMilestones;
-	}, [availableMilestones]);
+	const sortedMilestoneEntities = useMemo(() => {
+		return [...(milestoneEntities ?? [])].sort((a, b) => {
+			const aIsNow = a.title.toLowerCase() === "now";
+			const bIsNow = b.title.toLowerCase() === "now";
+			if (aIsNow) return -1;
+			if (bIsNow) return 1;
+			const aNum = parseInt(a.id.replace(/^m-/, ""), 10);
+			const bNum = parseInt(b.id.replace(/^m-/, ""), 10);
+			if (!isNaN(aNum) && !isNaN(bNum)) return aNum - bNum;
+			return a.title.localeCompare(b.title);
+		});
+	}, [milestoneEntities]);
 	const normalizedSearch = searchValue.trim();
 	const hasActiveFilters = Boolean(
 		normalizedSearch || statusFilter || priorityFilter || labelFilter.length > 0 || milestoneFilter,
@@ -604,7 +616,49 @@ const TaskList: React.FC<TaskListProps> = ({
 		});
 	}, [displayTasks, milestoneEntities, sortColumn, sortDirection]);
 
-	const currentCount = sortedDisplayTasks.length;
+	// Build hierarchical ordered list: parents followed by their subtasks
+	const hierarchicalDisplayTasks = useMemo(() => {
+		const taskMap = new Map(sortedDisplayTasks.map((t) => [t.id, t]));
+		const result: Array<{ task: Task; depth: number }> = [];
+		const added = new Set<string>();
+
+		for (const task of sortedDisplayTasks) {
+			if (added.has(task.id)) continue;
+			// Skip subtasks whose parent is in the current view — parent will include them
+			if (task.parentTaskId && taskMap.has(task.parentTaskId)) continue;
+
+			result.push({ task, depth: 0 });
+			added.add(task.id);
+
+			for (const subtaskRef of task.subtaskSummaries ?? []) {
+				if (taskMap.has(subtaskRef.id) && !added.has(subtaskRef.id)) {
+					result.push({ task: taskMap.get(subtaskRef.id)!, depth: 1 });
+					added.add(subtaskRef.id);
+				}
+			}
+		}
+
+		// Append orphaned subtasks (parent not in current view)
+		for (const task of sortedDisplayTasks) {
+			if (!added.has(task.id)) {
+				result.push({ task, depth: task.parentTaskId ? 1 : 0 });
+			}
+		}
+
+		return result;
+	}, [sortedDisplayTasks]);
+
+	// Active-only filtered view applied on top of sortedDisplayTasks
+	const finalDisplayItems = useMemo(() => {
+		if (!showActiveOnly || statusFilter) return hierarchicalDisplayTasks;
+		return hierarchicalDisplayTasks.filter(({ task }) => !INACTIVE_STATUSES.has(task.status.toLowerCase()));
+	}, [hierarchicalDisplayTasks, showActiveOnly, statusFilter]);
+
+	const currentCount = finalDisplayItems.length;
+	const activeCount = useMemo(
+		() => hierarchicalDisplayTasks.filter(({ task }) => !INACTIVE_STATUSES.has(task.status.toLowerCase())).length,
+		[hierarchicalDisplayTasks],
+	);
 
 	useEffect(() => {
 		const headerEl = tableHeaderScrollRef.current;
@@ -704,9 +758,9 @@ const TaskList: React.FC<TaskListProps> = ({
 					>
 						<option value="">All milestones</option>
 						<option value="__none">No milestone</option>
-						{milestoneOptions.map((milestone) => (
-							<option key={milestone} value={milestone}>
-								{getMilestoneLabel(milestone, milestoneEntities)}
+						{sortedMilestoneEntities.map((m) => (
+							<option key={m.id} value={m.id}>
+								{m.title}
 							</option>
 						))}
 					</select>
@@ -779,6 +833,18 @@ const TaskList: React.FC<TaskListProps> = ({
 					</div>
 
 					<div className="flex items-center gap-3 flex-shrink-0">
+						<button
+							type="button"
+							onClick={() => setShowActiveOnly((v) => !v)}
+							className={`py-2 px-3 text-sm border rounded-lg whitespace-nowrap transition-colors duration-200 ${
+								showActiveOnly
+									? "border-blue-400 dark:border-blue-500 bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300"
+									: "border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700"
+							}`}
+							title={showActiveOnly ? "Showing active tasks only — click to show all" : "Click to show active tasks only"}
+						>
+							Active only
+						</button>
 						{statusFilter.toLowerCase() === "done" && currentCount > 0 && (
 								<button
 									type="button"
@@ -806,7 +872,9 @@ const TaskList: React.FC<TaskListProps> = ({
 						</div>
 
 						<div className="text-sm text-gray-600 dark:text-gray-300 whitespace-nowrap text-right min-w-[170px]">
-							Showing {currentCount} of {totalTasks} tasks
+							{showActiveOnly && !statusFilter
+								? `Showing ${currentCount} of ${activeCount} active tasks`
+								: `Showing ${currentCount} of ${totalTasks} tasks`}
 						</div>
 					</div>
 				</div>
@@ -824,12 +892,14 @@ const TaskList: React.FC<TaskListProps> = ({
 						<path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
 					</svg>
 					<h3 className="mt-2 text-sm font-medium text-gray-900 dark:text-white">
-						{hasActiveFilters ? "No tasks match the current filters" : "No tasks"}
+						{hasActiveFilters || showActiveOnly ? "No tasks match the current filters" : "No tasks"}
 					</h3>
 					<p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
 						{hasActiveFilters
 							? "Try adjusting your search or clearing filters to see more tasks."
-							: "Get started by creating a new task."}
+							: showActiveOnly
+								? "No active tasks. Toggle 'Active only' to see all tasks."
+								: "Get started by creating a new task."}
 					</p>
 				</div>
 			) : (
@@ -857,7 +927,11 @@ const TaskList: React.FC<TaskListProps> = ({
 						<table className="w-full min-w-[1100px] table-fixed border-collapse">
 							{renderColumnGroup()}
 							<tbody className="divide-y divide-gray-200 dark:divide-gray-700">
-								{sortedDisplayTasks.map((task) => {
+								{finalDisplayItems.map(({ task, depth }) => {
+									// Collapse: skip subtask rows if parent is collapsed
+									if (depth === 1 && task.parentTaskId && collapsedParents.has(task.parentTaskId)) {
+										return null;
+									}
 									const isFromOtherBranch = Boolean(task.branch);
 									const visibleLabels = task.labels.slice(0, 2);
 									const labelOverflow = Math.max(task.labels.length - visibleLabels.length, 0);
@@ -865,6 +939,13 @@ const TaskList: React.FC<TaskListProps> = ({
 									const assigneeOverflow = Math.max(task.assignee.length - visibleAssignees.length, 0);
 									const milestoneLabel = task.milestone ? getMilestoneLabel(task.milestone, milestoneEntities) : "—";
 									const createdLabel = formatStoredUtcDateForCompactDisplay(task.createdDate ?? "");
+									// Determine if this parent has subtasks visible in the current view
+									const hasVisibleSubtasks =
+										depth === 0 &&
+										(task.subtaskSummaries ?? []).some((sub) =>
+											finalDisplayItems.some(({ task: t }) => t.id === sub.id),
+										);
+									const isCollapsed = collapsedParents.has(task.id);
 
 									return (
 										<tr
@@ -873,19 +954,51 @@ const TaskList: React.FC<TaskListProps> = ({
 											className={`cursor-pointer transition-colors ${
 												isFromOtherBranch
 													? "bg-amber-50/50 hover:bg-amber-100/70 dark:bg-amber-900/10 dark:hover:bg-amber-900/20"
-													: "bg-white hover:bg-gray-50 dark:bg-gray-800 dark:hover:bg-gray-700/50"
+													: depth === 1
+														? "bg-gray-50/80 hover:bg-gray-100/80 dark:bg-gray-800/60 dark:hover:bg-gray-700/40"
+														: "bg-white hover:bg-gray-50 dark:bg-gray-800 dark:hover:bg-gray-700/50"
 											}`}
 										>
 											<td className="px-3 py-2.5 text-xs font-mono text-gray-500 dark:text-gray-400 whitespace-nowrap">
+												{depth === 1 && (
+													<span className="inline-block w-4 mr-1 border-l-2 border-b-2 border-gray-300 dark:border-gray-600 h-3 ml-2" />
+												)}
 												{task.id}
 											</td>
-											<td className="px-3 py-2.5">
+											<td className={`py-2.5 ${depth === 1 ? "pl-8 pr-3" : "px-3"}`}>
 												<div className="flex items-center gap-2 min-w-0">
+													{hasVisibleSubtasks && (
+														<button
+															type="button"
+															onClick={(e) => {
+																e.stopPropagation();
+																setCollapsedParents((prev) => {
+																	const next = new Set(prev);
+																	if (next.has(task.id)) next.delete(task.id);
+																	else next.add(task.id);
+																	return next;
+																});
+															}}
+															className="shrink-0 text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300 transition-colors"
+															aria-label={isCollapsed ? "Expand subtasks" : "Collapse subtasks"}
+														>
+															<svg
+																className={`w-3 h-3 transition-transform ${isCollapsed ? "" : "rotate-90"}`}
+																fill="none"
+																stroke="currentColor"
+																viewBox="0 0 24 24"
+															>
+																<path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+															</svg>
+														</button>
+													)}
 													<span
 														className={`block truncate text-sm ${
 															isFromOtherBranch
 																? "text-gray-600 dark:text-gray-300"
-																: "text-gray-900 dark:text-gray-100"
+																: depth === 1
+																	? "text-gray-700 dark:text-gray-200"
+																	: "text-gray-900 dark:text-gray-100"
 														}`}
 														title={task.title}
 													>

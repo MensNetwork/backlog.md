@@ -14,6 +14,7 @@ interface BoardPageProps {
 	milestoneEntities: Milestone[];
 	archivedMilestones: Milestone[];
 	isLoading: boolean;
+	availableLabels?: string[];
 }
 
 export default function BoardPage({
@@ -26,6 +27,7 @@ export default function BoardPage({
 	milestoneEntities,
 	archivedMilestones,
 	isLoading,
+	availableLabels = [],
 }: BoardPageProps) {
 	const [searchParams, setSearchParams] = useSearchParams();
 	const [highlightTaskId, setHighlightTaskId] = useState<string | null>(null);
@@ -101,6 +103,7 @@ export default function BoardPage({
 				laneMode={laneMode}
 				onLaneChange={handleLaneChange}
 				milestoneFilter={milestoneFilter}
+				availableLabels={availableLabels}
 			/>
 		</div>
 	);

@@ -228,7 +228,15 @@ export const TaskDetailsModal: React.FC<Props> = ({
   const [priority, setPriority] = useState<string>(task?.priority || "");
   const [dependencies, setDependencies] = useState<string[]>(task?.dependencies || []);
   const [references, setReferences] = useState<string[]>(task?.references || []);
-  const [milestone, setMilestone] = useState<string>(task?.milestone || "");
+  const defaultMilestone = useMemo(() => {
+    if (task?.milestone) return task.milestone;
+    if (!task) {
+      const nowMilestone = (milestoneEntities ?? []).find((m) => m.title.toLowerCase() === "now");
+      return nowMilestone?.id ?? "";
+    }
+    return "";
+  }, [task, milestoneEntities]);
+  const [milestone, setMilestone] = useState<string>(defaultMilestone);
   const [availableTasks, setAvailableTasks] = useState<Task[]>([]);
   const milestoneSelectionValue = resolveMilestoneToId(milestone);
   const hasMilestoneSelection = (milestoneEntities ?? []).some((milestoneEntity) => milestoneEntity.id === milestoneSelectionValue);
@@ -299,7 +307,14 @@ export const TaskDetailsModal: React.FC<Props> = ({
     setPriority(task?.priority || "");
     setDependencies(task?.dependencies || []);
     setReferences(task?.references || []);
-    setMilestone(task?.milestone || "");
+    if (task?.milestone) {
+      setMilestone(task.milestone);
+    } else if (!task) {
+      const nowMilestone = (milestoneEntities ?? []).find((m) => m.title.toLowerCase() === "now");
+      setMilestone(nowMilestone?.id ?? "");
+    } else {
+      setMilestone("");
+    }
     setMode(isCreateMode ? "create" : "preview");
     setError(null);
     // Preload tasks for dependency picker
@@ -1042,7 +1057,16 @@ export const TaskDetailsModal: React.FC<Props> = ({
               {!hasMilestoneSelection && milestoneSelectionValue ? (
                 <option value={milestoneSelectionValue}>{resolveMilestoneLabel(milestoneSelectionValue)}</option>
               ) : null}
-              {(milestoneEntities ?? []).map((m) => (
+              {[...(milestoneEntities ?? [])].sort((a, b) => {
+                const aIsNow = a.title.toLowerCase() === "now";
+                const bIsNow = b.title.toLowerCase() === "now";
+                if (aIsNow) return -1;
+                if (bIsNow) return 1;
+                const aNum = parseInt(a.id.replace(/^m-/, ""), 10);
+                const bNum = parseInt(b.id.replace(/^m-/, ""), 10);
+                if (!isNaN(aNum) && !isNaN(bNum)) return aNum - bNum;
+                return a.title.localeCompare(b.title);
+              }).map((m) => (
                 <option key={m.id} value={m.id}>
                   {m.title}
                 </option>
