@@ -112,6 +112,7 @@ const TaskList: React.FC<TaskListProps> = ({
 	const [sortColumn, setSortColumn] = useState<TaskSortColumn>("id");
 	const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
 	const [showActiveOnly, setShowActiveOnly] = useState(true);
+	const [showSubtasks, setShowSubtasks] = useState(true);
 	const [collapsedParents, setCollapsedParents] = useState<Set<string>>(new Set());
 	const labelsButtonRef = useRef<HTMLButtonElement | null>(null);
 	const labelsMenuRef = useRef<HTMLDivElement | null>(null);
@@ -619,6 +620,16 @@ const TaskList: React.FC<TaskListProps> = ({
 	// Build hierarchical ordered list: parents followed by their subtasks
 	const hierarchicalDisplayTasks = useMemo(() => {
 		const taskMap = new Map(sortedDisplayTasks.map((t) => [t.id, t]));
+
+		// Build parent→children map from parentTaskId (subtaskSummaries is not populated by API)
+		const childrenMap = new Map<string, Task[]>();
+		for (const task of sortedDisplayTasks) {
+			if (task.parentTaskId && taskMap.has(task.parentTaskId)) {
+				if (!childrenMap.has(task.parentTaskId)) childrenMap.set(task.parentTaskId, []);
+				childrenMap.get(task.parentTaskId)!.push(task);
+			}
+		}
+
 		const result: Array<{ task: Task; depth: number }> = [];
 		const added = new Set<string>();
 
@@ -630,10 +641,10 @@ const TaskList: React.FC<TaskListProps> = ({
 			result.push({ task, depth: 0 });
 			added.add(task.id);
 
-			for (const subtaskRef of task.subtaskSummaries ?? []) {
-				if (taskMap.has(subtaskRef.id) && !added.has(subtaskRef.id)) {
-					result.push({ task: taskMap.get(subtaskRef.id)!, depth: 1 });
-					added.add(subtaskRef.id);
+			for (const subtask of childrenMap.get(task.id) ?? []) {
+				if (!added.has(subtask.id)) {
+					result.push({ task: subtask, depth: 1 });
+					added.add(subtask.id);
 				}
 			}
 		}
@@ -648,11 +659,17 @@ const TaskList: React.FC<TaskListProps> = ({
 		return result;
 	}, [sortedDisplayTasks]);
 
-	// Active-only filtered view applied on top of sortedDisplayTasks
+	// Active-only and subtask filtered views applied on top of hierarchicalDisplayTasks
 	const finalDisplayItems = useMemo(() => {
-		if (!showActiveOnly || statusFilter) return hierarchicalDisplayTasks;
-		return hierarchicalDisplayTasks.filter(({ task }) => !INACTIVE_STATUSES.has(task.status.toLowerCase()));
-	}, [hierarchicalDisplayTasks, showActiveOnly, statusFilter]);
+		let items = hierarchicalDisplayTasks;
+		if (showActiveOnly && !statusFilter) {
+			items = items.filter(({ task }) => !INACTIVE_STATUSES.has(task.status.toLowerCase()));
+		}
+		if (!showSubtasks) {
+			items = items.filter(({ task }) => !task.parentTaskId);
+		}
+		return items;
+	}, [hierarchicalDisplayTasks, showActiveOnly, showSubtasks, statusFilter]);
 
 	const currentCount = finalDisplayItems.length;
 	const activeCount = useMemo(
@@ -786,7 +803,7 @@ const TaskList: React.FC<TaskListProps> = ({
 						{showLabelsMenu && (
 							<div
 								ref={labelsMenuRef}
-								className="absolute z-10 mt-2 w-[220px] max-h-56 overflow-y-auto rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 shadow-lg"
+								className="absolute z-50 mt-2 w-[220px] max-h-56 overflow-y-auto rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 shadow-lg"
 							>
 								{mergedAvailableLabels.length === 0 ? (
 									<div className="px-3 py-2 text-sm text-gray-500 dark:text-gray-400">No labels</div>
@@ -844,6 +861,18 @@ const TaskList: React.FC<TaskListProps> = ({
 							title={showActiveOnly ? "Showing active tasks only — click to show all" : "Click to show active tasks only"}
 						>
 							Active only
+						</button>
+						<button
+							type="button"
+							onClick={() => setShowSubtasks((v) => !v)}
+							className={`py-2 px-3 text-sm border rounded-lg whitespace-nowrap transition-colors duration-200 ${
+								showSubtasks
+									? "border-blue-400 dark:border-blue-500 bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300"
+									: "border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700"
+							}`}
+							title={showSubtasks ? "Showing subtasks — click to hide" : "Subtasks hidden — click to show"}
+						>
+							Subtasks
 						</button>
 						{statusFilter.toLowerCase() === "done" && currentCount > 0 && (
 								<button

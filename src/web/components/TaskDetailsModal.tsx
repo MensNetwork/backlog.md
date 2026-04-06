@@ -20,6 +20,7 @@ interface Props {
   onNavigateToTask?: (taskId: string) => void; // Navigate to a different task (parent/subtask)
   availableStatuses?: string[]; // Available statuses for new tasks
   isDraftMode?: boolean; // Whether creating a draft
+  availableLabels?: string[];
   availableMilestones?: string[];
   milestoneEntities?: Milestone[];
   archivedMilestoneEntities?: Milestone[];
@@ -58,6 +59,7 @@ export const TaskDetailsModal: React.FC<Props> = ({
   onArchive,
   onNavigateToTask,
   availableStatuses,
+  availableLabels = [],
   availableMilestones: _availableMilestones,
   milestoneEntities,
   archivedMilestoneEntities,
@@ -230,7 +232,7 @@ export const TaskDetailsModal: React.FC<Props> = ({
   const defaultMilestone = useMemo(() => {
     if (task?.milestone) return task.milestone;
     if (!task) {
-      const nowMilestone = (milestoneEntities ?? []).find((m) => m.title.toLowerCase() === "now");
+      const nowMilestone = (milestoneEntities ?? []).find((m) => m.title.toLowerCase().replace(/^name:\s*/, '') === "now");
       return nowMilestone?.id ?? "";
     }
     return "";
@@ -288,7 +290,7 @@ export const TaskDetailsModal: React.FC<Props> = ({
       }
     };
     window.addEventListener("keydown", onKey, { capture: true });
-    return () => window.removeEventListener("keydown", onKey, { capture: true } as any);
+    return () => window.removeEventListener("keydown", onKey, { capture: true });
   }, [mode, title, description, plan, notes, finalSummary, criteria, definitionOfDone, status]);
 
   // Reset local state when task changes or modal opens
@@ -309,7 +311,7 @@ export const TaskDetailsModal: React.FC<Props> = ({
     if (task?.milestone) {
       setMilestone(task.milestone);
     } else if (!task) {
-      const nowMilestone = (milestoneEntities ?? []).find((m) => m.title.toLowerCase() === "now");
+      const nowMilestone = (milestoneEntities ?? []).find((m) => m.title.toLowerCase().replace(/^name:\s*/, '') === "now");
       setMilestone(nowMilestone?.id ?? "");
     } else {
       setMilestone("");
@@ -318,7 +320,7 @@ export const TaskDetailsModal: React.FC<Props> = ({
     setError(null);
     // Preload tasks for dependency picker
     apiClient.fetchTasks().then(setAvailableTasks).catch(() => setAvailableTasks([]));
-  }, [task, isOpen, isCreateMode, isDraftMode, availableStatuses, defaultDefinitionOfDone]);
+  }, [task, isOpen, isCreateMode, isDraftMode, availableStatuses, defaultDefinitionOfDone, milestoneEntities]);
 
   const handleTaskNavigation = (targetTaskId: string) => {
     if ((mode === "edit" || mode === "create") && isDirty) {
@@ -1018,6 +1020,7 @@ export const TaskDetailsModal: React.FC<Props> = ({
               value={labels}
               onChange={(value) => handleInlineMetaUpdate({ labels: value })}
               placeholder="Type label and press Enter or comma"
+              suggestions={availableLabels}
               disabled={isFromOtherBranch}
             />
           </div>
