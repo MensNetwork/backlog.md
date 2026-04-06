@@ -29,6 +29,7 @@ import { apiClient } from './lib/api';
 import { useHealthCheckContext } from './contexts/HealthCheckContext';
 import { getWebVersion } from './utils/version';
 import { collectArchivedMilestoneKeys, collectMilestoneIds, milestoneKey } from './utils/milestones';
+import { collectAvailableLabels } from '../utils/label-filter';
 import { navigateToTask } from './utils/navigate-to-task';
 
 const buildMilestoneAliasMap = (milestones: Milestone[], archivedMilestones: Milestone[]): Map<string, string> => {
@@ -275,7 +276,7 @@ function App() {
 
       setStatuses(statusesData);
       setProjectName(configData.projectName);
-      setAvailableLabels(configData.labels || []);
+      setAvailableLabels(collectAvailableLabels(tasksList, configData.labels || []));
       setConfig(configData);
       setMilestoneEntities(milestonesData);
       setArchivedMilestones(archivedMilestonesData);
@@ -579,6 +580,7 @@ function App() {
           onArchive={editingTask ? () => handleArchiveTask(editingTask.id) : undefined}
           onNavigateToTask={handleNavigateToTask}
           availableStatuses={isDraftMode ? ['Draft', ...statuses] : statuses}
+          availableLabels={availableLabels}
           availableMilestones={milestones}
           milestoneEntities={milestoneEntities}
           archivedMilestoneEntities={archivedMilestones}

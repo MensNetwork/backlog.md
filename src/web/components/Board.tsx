@@ -8,6 +8,8 @@ import TaskColumn from './TaskColumn';
 import CleanupModal from './CleanupModal';
 import { SuccessToast } from './SuccessToast';
 
+const INACTIVE_STATUSES = new Set(['done', 'cancelled', 'parked']);
+
 interface BoardProps {
   onEditTask: (task: Task) => void;
   onNewTask: () => void;
@@ -45,6 +47,7 @@ const Board: React.FC<BoardProps> = ({
   const [dragSourceLane, setDragSourceLane] = useState<string | null>(null);
   const [showCleanupModal, setShowCleanupModal] = useState(false);
   const [labelFilter, setLabelFilter] = useState<string[]>([]);
+  const [showActiveOnly, setShowActiveOnly] = useState(true);
   const [cleanupSuccessMessage, setCleanupSuccessMessage] = useState<string | null>(null);
   const [collapsedLanes, setCollapsedLanes] = useState<Record<string, boolean>>({});
   const archivedMilestoneIds = useMemo(
@@ -188,9 +191,12 @@ const Board: React.FC<BoardProps> = ({
     [tasks, availableLabels],
   );
 
-  // Filter tasks by milestone and labels
+  // Filter tasks: always exclude subtasks; apply milestone, label, and active-only filters
   const filteredTasks = useMemo(() => {
-    let result = tasks;
+    let result = tasks.filter(task => !task.parentTaskId);
+    if (showActiveOnly) {
+      result = result.filter(task => !INACTIVE_STATUSES.has(task.status.toLowerCase()));
+    }
     if (milestoneFilter) {
       result = result.filter(task => canonicalizeMilestone(task.milestone) === canonicalMilestoneFilter);
     }
@@ -198,7 +204,7 @@ const Board: React.FC<BoardProps> = ({
       result = result.filter(task => labelFilter.every(lf => task.labels.includes(lf)));
     }
     return result;
-  }, [tasks, milestoneFilter, canonicalMilestoneFilter, milestoneAliasToCanonical, labelFilter]);
+  }, [tasks, showActiveOnly, milestoneFilter, canonicalMilestoneFilter, milestoneAliasToCanonical, labelFilter]);
 
   // Handle highlighting a task (opening its edit popup)
   useEffect(() => {
@@ -275,34 +281,19 @@ const Board: React.FC<BoardProps> = ({
     });
   }, [tasks, archivedMilestoneIds, milestoneAliasToCanonical]);
 
-  // Use all tasks for lane grouping (for counts and visibility)
+  // Always group from filteredTasks (subtasks excluded, active-only applied)
   const tasksByLane = useMemo(
-    () => groupTasksByLaneAndStatus(laneMode, lanes, statuses, tasks, {
+    () => groupTasksByLaneAndStatus(laneMode, lanes, statuses, filteredTasks, {
       archivedMilestoneIds,
       milestoneEntities,
       archivedMilestones,
     }),
-    [laneMode, lanes, statuses, tasks, archivedMilestoneIds, milestoneEntities, archivedMilestones]
-  );
-
-  // Separate grouping for filtered display in columns
-  const filteredTasksByLane = useMemo(
-    () =>
-      groupTasksByLaneAndStatus(laneMode, lanes, statuses, filteredTasks, {
-        archivedMilestoneIds,
-        milestoneEntities,
-        archivedMilestones,
-      }),
     [laneMode, lanes, statuses, filteredTasks, archivedMilestoneIds, milestoneEntities, archivedMilestones]
   );
 
   const getTasksForLane = (laneKey: string, status: string): Task[] => {
-    // When filtering by milestone, use filtered tasks for display
-    const sourceMap = milestoneFilter ? filteredTasksByLane : tasksByLane;
-    const statusMap = sourceMap.get(laneKey);
-    if (!statusMap) {
-      return [];
-    }
+    const statusMap = tasksByLane.get(laneKey);
+    if (!statusMap) return [];
     return statusMap.get(status) ?? [];
   };
 
@@ -315,6 +306,13 @@ const Board: React.FC<BoardProps> = ({
     }
     return count;
   };
+
+  // Only show status columns that have at least one task
+  const visibleStatuses = useMemo(
+    () => statuses.filter(status => getTasksForLane(DEFAULT_LANE_KEY, status).length > 0 ||
+      lanes.some(lane => getTasksForLane(lane.key, status).length > 0)),
+    [statuses, tasksByLane, lanes]
+  );
 
   const countDoneTasksInLane = (laneKey: string): number => {
     const statusMap = tasksByLane.get(laneKey);
@@ -426,18 +424,32 @@ const Board: React.FC<BoardProps> = ({
             </button>
           </div>
         </div>
-	        <button
-	          className="inline-flex items-center px-4 py-2 bg-blue-500 dark:bg-blue-600 text-white text-sm font-medium rounded-md hover:bg-blue-600 dark:hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-400 dark:focus:ring-blue-500 dark:focus:ring-offset-gray-800 transition-colors duration-200"
-	          onClick={onNewTask}
-	        >
-	          + New Task
-        </button>
+        <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={() => setShowActiveOnly((v) => !v)}
+            className={`py-2 px-3 text-sm border rounded-lg whitespace-nowrap transition-colors duration-200 ${
+              showActiveOnly
+                ? "border-blue-400 dark:border-blue-500 bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300"
+                : "border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700"
+            }`}
+            title={showActiveOnly ? "Showing active tasks only — click to show all" : "Click to show active tasks only"}
+          >
+            Active only
+          </button>
+          <button
+            className="inline-flex items-center px-4 py-2 bg-blue-500 dark:bg-blue-600 text-white text-sm font-medium rounded-md hover:bg-blue-600 dark:hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-400 dark:focus:ring-blue-500 dark:focus:ring-offset-gray-800 transition-colors duration-200"
+            onClick={onNewTask}
+          >
+            + New Task
+          </button>
+        </div>
       </div>
 
       {/* Label filter bar */}
       {mergedLabels.length > 0 && (
-        <div className="flex flex-wrap items-center gap-2 mb-4">
-          <span className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Labels:</span>
+        <div className="flex items-center gap-2 mb-4 flex-wrap">
+          <span className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider shrink-0">Labels:</span>
           {mergedLabels.map((label) => {
             const active = labelFilter.includes(label);
             return (
@@ -449,7 +461,7 @@ const Board: React.FC<BoardProps> = ({
                     active ? prev.filter((l) => l !== label) : [...prev, label],
                   )
                 }
-                className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-circle text-xs font-medium transition-colors ${
+                className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full shrink-0 text-xs font-medium transition-colors ${
                   active
                     ? "bg-blue-600 text-white dark:bg-blue-500"
                     : "bg-gray-100 text-gray-700 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600"
@@ -466,7 +478,7 @@ const Board: React.FC<BoardProps> = ({
             <button
               type="button"
               onClick={() => setLabelFilter([])}
-              className="text-xs text-blue-600 dark:text-blue-400 hover:underline ml-1"
+              className="text-xs text-blue-600 dark:text-blue-400 hover:underline ml-1 shrink-0"
             >
               Clear
             </button>
@@ -525,8 +537,8 @@ const Board: React.FC<BoardProps> = ({
                 {/* Lane content - columns */}
                 {!isCollapsed && (
                   <div className="p-4">
-                    <div className="grid gap-4" style={{ gridTemplateColumns: `repeat(${statuses.length}, minmax(0, 1fr))` }}>
-                      {statuses.map((status) => (
+                    <div className="grid gap-4" style={{ gridTemplateColumns: `repeat(${visibleStatuses.length}, minmax(0, 1fr))` }}>
+                      {visibleStatuses.map((status) => (
                         <div key={`${lane.key}-${status}`} className="min-w-0">
                           <TaskColumn
                             title={status}
@@ -560,7 +572,7 @@ const Board: React.FC<BoardProps> = ({
       ) : (
         <div className="overflow-x-auto pb-2">
           <div className="flex flex-row flex-nowrap gap-4 w-full">
-            {statuses.map((status) => (
+            {visibleStatuses.map((status) => (
               <div key={status} className="flex-1 min-w-[16rem]">
                 <TaskColumn
                   title={status}
