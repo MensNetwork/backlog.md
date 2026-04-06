@@ -227,15 +227,8 @@ const Board: React.FC<BoardProps> = ({
     if (labelFilter.length > 0) {
       result = result.filter(task => labelFilter.some(lf => task.labels.includes(lf)));
     }
-    if (sortPriority) {
-      result = result.slice().sort((a, b) => {
-        const ra = PRIORITY_RANK[a.priority?.toLowerCase() ?? ''] ?? 99;
-        const rb = PRIORITY_RANK[b.priority?.toLowerCase() ?? ''] ?? 99;
-        return sortPriority === 'desc' ? ra - rb : rb - ra;
-      });
-    }
     return result;
-  }, [tasks, showActiveOnly, milestoneFilter, canonicalMilestoneFilter, milestoneAliasToCanonical, labelFilter, sortPriority]);
+  }, [tasks, showActiveOnly, milestoneFilter, canonicalMilestoneFilter, milestoneAliasToCanonical, labelFilter]);
 
   // Handle highlighting a task (opening its edit popup)
   useEffect(() => {
@@ -322,8 +315,26 @@ const Board: React.FC<BoardProps> = ({
     [laneMode, lanes, statuses, filteredTasks, archivedMilestoneIds, milestoneEntities, archivedMilestones]
   );
 
+  // Apply priority sort after lane grouping (groupTasksByLaneAndStatus re-sorts internally)
+  const displayTasksByLane = useMemo(() => {
+    if (!sortPriority) return tasksByLane;
+    const sorted = new Map<string, Map<string, Task[]>>();
+    for (const [laneKey, statusMap] of tasksByLane) {
+      const newStatusMap = new Map<string, Task[]>();
+      for (const [status, list] of statusMap) {
+        newStatusMap.set(status, list.slice().sort((a, b) => {
+          const ra = PRIORITY_RANK[a.priority?.toLowerCase() ?? ''] ?? 99;
+          const rb = PRIORITY_RANK[b.priority?.toLowerCase() ?? ''] ?? 99;
+          return sortPriority === 'desc' ? ra - rb : rb - ra;
+        }));
+      }
+      sorted.set(laneKey, newStatusMap);
+    }
+    return sorted;
+  }, [tasksByLane, sortPriority]);
+
   const getTasksForLane = (laneKey: string, status: string): Task[] => {
-    const statusMap = tasksByLane.get(laneKey);
+    const statusMap = displayTasksByLane.get(laneKey);
     if (!statusMap) return [];
     return statusMap.get(status) ?? [];
   };
