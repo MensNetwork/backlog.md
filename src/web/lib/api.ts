@@ -11,6 +11,30 @@ import type {
 	TaskStatus,
 } from "../../types/index.ts";
 
+// Inbox types (mirrors server-side InboxListResponse)
+export interface InboxMessage {
+	id: string;
+	filename: string;
+	dept: string | null;
+	module: string | null;
+	isModule: boolean;
+	isProcessed: boolean;
+	type: string | null;
+	from: string | null;
+	to: string | null;
+	priority: string | null;
+	title: string;
+	date: string | null;
+	preview: string;
+	filePath: string;
+}
+
+export interface InboxListResponse {
+	messages: InboxMessage[];
+	unreadCount: number;
+	modules: string[];
+}
+
 const API_BASE = "/api";
 
 export interface ReorderTaskPayload {
@@ -474,6 +498,23 @@ export class ApiClient {
 
 	async checkStatus(): Promise<InitializationStatus> {
 		return this.fetchJson<InitializationStatus>(`${API_BASE}/status`);
+	}
+
+	async fetchInbox(): Promise<InboxListResponse> {
+		return this.fetchJson<InboxListResponse>(`${API_BASE}/inbox`);
+	}
+
+	async fetchInboxMessage(filePath: string): Promise<{ content: string; raw: string }> {
+		return this.fetchJson<{ content: string; raw: string }>(
+			`${API_BASE}/inbox/message?path=${encodeURIComponent(filePath)}`,
+		);
+	}
+
+	async archiveInboxMessage(filePath: string): Promise<{ success: boolean; destPath: string }> {
+		return this.fetchJson<{ success: boolean; destPath: string }>(`${API_BASE}/inbox/archive`, {
+			method: "POST",
+			body: JSON.stringify({ filePath }),
+		});
 	}
 
 	async initializeProject(options: {

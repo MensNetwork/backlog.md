@@ -1,4 +1,5 @@
-import { dirname, join } from "node:path";
+import { mkdir, readdir, readFile, rename, stat } from "node:fs/promises";
+import { basename, dirname, join, resolve } from "node:path";
 import type { Server, ServerWebSocket } from "bun";
 import { $ } from "bun";
 import { Core } from "../core/backlog.ts";
@@ -10,6 +11,30 @@ import { isCreateLockError } from "../file-system/operations.ts";
 import type { SearchPriorityFilter, SearchResultType, Task, TaskUpdateInput } from "../types/index.ts";
 import { watchConfig } from "../utils/config-watcher.ts";
 import { getVersion } from "../utils/version.ts";
+
+// ---- Inbox types ----
+export interface InboxMessage {
+	id: string;
+	filename: string;
+	dept: string | null;
+	module: string | null;
+	isModule: boolean;
+	isProcessed: boolean;
+	type: string | null;
+	from: string | null;
+	to: string | null;
+	priority: string | null;
+	title: string;
+	date: string | null;
+	preview: string;
+	filePath: string;
+}
+
+export interface InboxListResponse {
+	messages: InboxMessage[];
+	unreadCount: number;
+	modules: string[];
+}
 
 // Regex pattern to match any prefix (letters followed by dash)
 const PREFIX_PATTERN = /^[a-zA-Z]+-/i;
@@ -400,6 +425,16 @@ export class BacklogServer {
 					},
 					"/api/search": {
 						GET: async (req: Request) => await this.handleSearch(req),
+					},
+					"/api/inbox": {
+						GET: async (req: Request) => await this.handleListInbox(req),
+					},
+					"/inbox": indexHtml,
+					"/api/inbox/message": {
+						GET: async (req: Request) => await this.handleGetInboxMessage(req),
+					},
+					"/api/inbox/archive": {
+						POST: async (req: Request) => await this.handleArchiveInboxMessage(req),
 					},
 					"/sequences": {
 						GET: async () => await this.handleGetSequences(),
@@ -1583,6 +1618,291 @@ export class BacklogServer {
 			console.error("Error initializing project:", error);
 			const message = error instanceof Error ? error.message : "Failed to initialize project";
 			return Response.json({ error: message }, { status: 500 });
+		}
+	}
+
+	// ---- Inbox handlers ----
+
+	/** Derive the c-suite root from the project root (rootDir IS the c-suite root) */
+	private getCsuitRoot(): string {
+		return this.core.filesystem.rootDir;
+	}
+
+	/** Parse YAML frontmatter (simple key: value, no nested structures needed) */
+	private parseFrontmatter(content: string): { data: Record<string, string>; body: string } {
+		const data: Record<string, string> = {};
+		let body = content;
+		const fmMatch = content.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/);
+		if (fmMatch) {
+			const yaml = fmMatch[1] ?? "";
+			body = fmMatch[2] ?? "";
+			for (const line of yaml.split(/\r?\n/)) {
+				const colonIdx = line.indexOf(":");
+				if (colonIdx === -1) continue;
+				const key = line.slice(0, colonIdx).trim().toLowerCase();
+				const val = line
+					.slice(colonIdx + 1)
+					.trim()
+					.replace(/^["']|["']$/g, "");
+				if (key) data[key] = val;
+			}
+		}
+		return { data, body };
+	}
+
+	/** Get a one-line preview from the message body (first non-empty line) */
+	private getPreview(body: string): string {
+		for (const line of body.split(/\r?\n/)) {
+			const trimmed = line.trim();
+			if (trimmed && !trimmed.startsWith("#")) {
+				return trimmed.slice(0, 120);
+			}
+		}
+		return "";
+	}
+
+	/** Convert filename to a readable slug-based title */
+	private filenameToTitle(filename: string): string {
+		return basename(filename, ".md")
+			.replace(/^\d{4}-\d{2}-\d{2}[-_]?/, "")
+			.replace(/[-_]/g, " ")
+			.trim();
+	}
+
+	/** Scan a single inbox directory and return messages */
+	private async scanInboxDir(
+		inboxDir: string,
+		dept: string | null,
+		moduleName: string | null,
+		isModule: boolean,
+	): Promise<InboxMessage[]> {
+		const messages: InboxMessage[] = [];
+		let entries: string[];
+		try {
+			entries = await readdir(inboxDir);
+		} catch {
+			return messages;
+		}
+
+		for (const filename of entries) {
+			if (!filename.endsWith(".md")) continue;
+			const filePath = join(inboxDir, filename);
+			let fileStat: Awaited<ReturnType<typeof stat>>;
+			try {
+				fileStat = await stat(filePath);
+				if (!fileStat.isFile()) continue;
+			} catch {
+				continue;
+			}
+
+			let content = "";
+			try {
+				content = await readFile(filePath, "utf-8");
+			} catch {
+				continue;
+			}
+
+			const { data, body } = this.parseFrontmatter(content);
+
+			const dateRaw = data["date"] ?? null;
+			const mtimeIso = fileStat.mtime.toISOString().slice(0, 10);
+
+			messages.push({
+				id: `${dept ?? moduleName ?? "unknown"}:${filename}`,
+				filename,
+				dept,
+				module: moduleName,
+				isModule,
+				isProcessed: false,
+				type: data["type"] ?? null,
+				from: data["from"] ?? null,
+				to: data["to"] ?? null,
+				priority: data["priority"] ?? null,
+				title: data["title"] ?? this.filenameToTitle(filename),
+				date: dateRaw ?? mtimeIso,
+				preview: this.getPreview(body),
+				filePath,
+			});
+		}
+
+		// Also scan processed/ subdirectory
+		const processedDir = join(inboxDir, "processed");
+		let processedEntries: string[];
+		try {
+			processedEntries = await readdir(processedDir);
+		} catch {
+			processedEntries = [];
+		}
+
+		for (const filename of processedEntries) {
+			if (!filename.endsWith(".md")) continue;
+			const filePath = join(processedDir, filename);
+			let fileStat: Awaited<ReturnType<typeof stat>>;
+			try {
+				fileStat = await stat(filePath);
+				if (!fileStat.isFile()) continue;
+			} catch {
+				continue;
+			}
+
+			let content = "";
+			try {
+				content = await readFile(filePath, "utf-8");
+			} catch {
+				continue;
+			}
+
+			const { data, body } = this.parseFrontmatter(content);
+			const dateRaw = data["date"] ?? null;
+			const mtimeIso = fileStat.mtime.toISOString().slice(0, 10);
+
+			messages.push({
+				id: `${dept ?? moduleName ?? "unknown"}:processed:${filename}`,
+				filename,
+				dept,
+				module: moduleName,
+				isModule,
+				isProcessed: true,
+				type: data["type"] ?? null,
+				from: data["from"] ?? null,
+				to: data["to"] ?? null,
+				priority: data["priority"] ?? null,
+				title: data["title"] ?? this.filenameToTitle(filename),
+				date: dateRaw ?? mtimeIso,
+				preview: this.getPreview(body),
+				filePath,
+			});
+		}
+
+		return messages;
+	}
+
+	private async handleListInbox(_req: Request): Promise<Response> {
+		try {
+			const csRoot = this.getCsuitRoot();
+			const depts = ["ceo", "cto", "cmo", "cfo"];
+			const allMessages: InboxMessage[] = [];
+			const foundModules: string[] = [];
+
+			// Scan department inboxes
+			for (const dept of depts) {
+				const inboxDir = join(csRoot, "departments", dept, "inbox");
+				const msgs = await this.scanInboxDir(inboxDir, dept.toUpperCase(), null, false);
+				allMessages.push(...msgs);
+			}
+
+			// Discover and scan module inboxes
+			const modulesDir = join(csRoot, "modules");
+			let moduleEntries: string[];
+			try {
+				moduleEntries = await readdir(modulesDir);
+			} catch {
+				moduleEntries = [];
+			}
+
+			for (const moduleName of moduleEntries) {
+				const inboxDir = join(modulesDir, moduleName, "inbox");
+				let inboxStat: Awaited<ReturnType<typeof stat>>;
+				try {
+					inboxStat = await stat(inboxDir);
+					if (!inboxStat.isDirectory()) continue;
+				} catch {
+					continue;
+				}
+				foundModules.push(moduleName);
+				const msgs = await this.scanInboxDir(inboxDir, null, moduleName, true);
+				allMessages.push(...msgs);
+			}
+
+			// Sort: unread first, then by date descending
+			allMessages.sort((a, b) => {
+				if (a.isProcessed !== b.isProcessed) {
+					return a.isProcessed ? 1 : -1;
+				}
+				const da = a.date ?? "";
+				const db = b.date ?? "";
+				return db.localeCompare(da);
+			});
+
+			const unreadCount = allMessages.filter((m) => !m.isProcessed).length;
+
+			return Response.json({
+				messages: allMessages,
+				unreadCount,
+				modules: foundModules.sort(),
+			} satisfies InboxListResponse);
+		} catch (error) {
+			console.error("Error listing inbox:", error);
+			return Response.json({ error: "Failed to list inbox" }, { status: 500 });
+		}
+	}
+
+	private async handleGetInboxMessage(req: Request): Promise<Response> {
+		try {
+			const url = new URL(req.url);
+			const filePath = url.searchParams.get("path");
+			if (!filePath) {
+				return Response.json({ error: "Missing path parameter" }, { status: 400 });
+			}
+
+			// Security: must be within c-suite root
+			const csRoot = this.getCsuitRoot();
+			const resolvedPath = resolve(filePath);
+			if (!resolvedPath.startsWith(csRoot)) {
+				return Response.json({ error: "Forbidden" }, { status: 403 });
+			}
+
+			let content: string;
+			try {
+				content = await readFile(resolvedPath, "utf-8");
+			} catch {
+				return Response.json({ error: "File not found" }, { status: 404 });
+			}
+
+			const { body } = this.parseFrontmatter(content);
+
+			return Response.json({ content: body, raw: content });
+		} catch (error) {
+			console.error("Error getting inbox message:", error);
+			return Response.json({ error: "Failed to get message" }, { status: 500 });
+		}
+	}
+
+	private async handleArchiveInboxMessage(req: Request): Promise<Response> {
+		try {
+			const body = await req.json();
+			const filePath: string = typeof body.filePath === "string" ? body.filePath : "";
+			if (!filePath) {
+				return Response.json({ error: "Missing filePath" }, { status: 400 });
+			}
+
+			// Security: must be within c-suite root
+			const csRoot = this.getCsuitRoot();
+			const resolvedPath = resolve(filePath);
+			if (!resolvedPath.startsWith(csRoot)) {
+				return Response.json({ error: "Forbidden" }, { status: 403 });
+			}
+
+			// Must not already be in a processed/ dir
+			if (resolvedPath.includes(`${join("inbox", "processed")}`)) {
+				return Response.json({ error: "Already archived" }, { status: 400 });
+			}
+
+			const dir = dirname(resolvedPath);
+			const file = basename(resolvedPath);
+			const processedDir = join(dir, "processed");
+			const destPath = join(processedDir, file);
+
+			// Ensure processed/ dir exists
+			await mkdir(processedDir, { recursive: true });
+
+			// Move the file
+			await rename(resolvedPath, destPath);
+
+			return Response.json({ success: true, destPath });
+		} catch (error) {
+			console.error("Error archiving inbox message:", error);
+			return Response.json({ error: "Failed to archive message" }, { status: 500 });
 		}
 	}
 }
