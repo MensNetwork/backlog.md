@@ -48,6 +48,7 @@ const Board: React.FC<BoardProps> = ({
   const [showCleanupModal, setShowCleanupModal] = useState(false);
   const [labelFilter, setLabelFilter] = useState<string[]>([]);
   const [showActiveOnly, setShowActiveOnly] = useState(true);
+  const [sortPriority, setSortPriority] = useState<'asc' | 'desc' | null>(null);
   const [cleanupSuccessMessage, setCleanupSuccessMessage] = useState<string | null>(null);
   const [collapsedLanes, setCollapsedLanes] = useState<Record<string, boolean>>({});
   const archivedMilestoneIds = useMemo(
@@ -191,6 +192,29 @@ const Board: React.FC<BoardProps> = ({
     [tasks, availableLabels],
   );
 
+  // Group labels by prefix (dept > type > module > others), sorted within each group
+  const LABEL_GROUP_PRIORITY: Record<string, number> = { dept: 0, type: 1, module: 2 };
+  const groupedLabels = useMemo(() => {
+    const groups = new Map<string, string[]>();
+    for (const label of mergedLabels) {
+      const colon = label.indexOf(':');
+      const prefix = colon > 0 ? label.slice(0, colon) : '';
+      const key = prefix || '__other__';
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key)!.push(label);
+    }
+    return Array.from(groups.entries())
+      .sort(([a], [b]) => {
+        const pa = LABEL_GROUP_PRIORITY[a] ?? 99;
+        const pb = LABEL_GROUP_PRIORITY[b] ?? 99;
+        if (pa !== pb) return pa - pb;
+        return a.localeCompare(b);
+      })
+      .map(([prefix, labels]) => ({ prefix: prefix === '__other__' ? '' : prefix, labels: labels.sort() }));
+  }, [mergedLabels]);
+
+  const PRIORITY_RANK: Record<string, number> = { high: 0, medium: 1, low: 2 };
+
   // Filter tasks: always exclude subtasks; apply milestone, label, and active-only filters
   const filteredTasks = useMemo(() => {
     let result = tasks.filter(task => !task.parentTaskId);
@@ -201,10 +225,17 @@ const Board: React.FC<BoardProps> = ({
       result = result.filter(task => canonicalizeMilestone(task.milestone) === canonicalMilestoneFilter);
     }
     if (labelFilter.length > 0) {
-      result = result.filter(task => labelFilter.every(lf => task.labels.includes(lf)));
+      result = result.filter(task => labelFilter.some(lf => task.labels.includes(lf)));
+    }
+    if (sortPriority) {
+      result = result.slice().sort((a, b) => {
+        const ra = PRIORITY_RANK[a.priority?.toLowerCase() ?? ''] ?? 99;
+        const rb = PRIORITY_RANK[b.priority?.toLowerCase() ?? ''] ?? 99;
+        return sortPriority === 'desc' ? ra - rb : rb - ra;
+      });
     }
     return result;
-  }, [tasks, showActiveOnly, milestoneFilter, canonicalMilestoneFilter, milestoneAliasToCanonical, labelFilter]);
+  }, [tasks, showActiveOnly, milestoneFilter, canonicalMilestoneFilter, milestoneAliasToCanonical, labelFilter, sortPriority]);
 
   // Handle highlighting a task (opening its edit popup)
   useEffect(() => {
@@ -307,11 +338,13 @@ const Board: React.FC<BoardProps> = ({
     return count;
   };
 
-  // Only show status columns that have at least one task
+  // Show all status columns; when active-only is on, hide inactive statuses with no tasks
   const visibleStatuses = useMemo(
-    () => statuses.filter(status => getTasksForLane(DEFAULT_LANE_KEY, status).length > 0 ||
-      lanes.some(lane => getTasksForLane(lane.key, status).length > 0)),
-    [statuses, tasksByLane, lanes]
+    () => statuses.filter(status => {
+      if (showActiveOnly && INACTIVE_STATUSES.has(status.toLowerCase())) return false;
+      return true;
+    }),
+    [statuses, showActiveOnly]
   );
 
   const countDoneTasksInLane = (laneKey: string): number => {
@@ -438,6 +471,18 @@ const Board: React.FC<BoardProps> = ({
             Active only
           </button>
           <button
+            type="button"
+            onClick={() => setSortPriority((v) => v === null ? 'desc' : v === 'desc' ? 'asc' : null)}
+            className={`py-2 px-3 text-sm border rounded-lg whitespace-nowrap transition-colors duration-200 ${
+              sortPriority
+                ? "border-blue-400 dark:border-blue-500 bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300"
+                : "border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700"
+            }`}
+            title={sortPriority === null ? "Sort by priority" : sortPriority === 'desc' ? "High → Low — click for Low → High" : "Low → High — click to clear sort"}
+          >
+            Priority {sortPriority === 'desc' ? '↓' : sortPriority === 'asc' ? '↑' : '↕'}
+          </button>
+          <button
             className="inline-flex items-center px-4 py-2 bg-blue-500 dark:bg-blue-600 text-white text-sm font-medium rounded-md hover:bg-blue-600 dark:hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-400 dark:focus:ring-blue-500 dark:focus:ring-offset-gray-800 transition-colors duration-200"
             onClick={onNewTask}
           >
@@ -446,34 +491,43 @@ const Board: React.FC<BoardProps> = ({
         </div>
       </div>
 
-      {/* Label filter bar */}
-      {mergedLabels.length > 0 && (
-        <div className="flex items-center gap-2 mb-4 flex-wrap">
+      {/* Label filter bar — grouped by prefix, sorted by importance */}
+      {groupedLabels.length > 0 && (
+        <div className="flex items-center gap-x-3 gap-y-2 mb-4 flex-wrap">
           <span className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider shrink-0">Labels:</span>
-          {mergedLabels.map((label) => {
-            const active = labelFilter.includes(label);
-            return (
-              <button
-                key={label}
-                type="button"
-                onClick={() =>
-                  setLabelFilter((prev) =>
-                    active ? prev.filter((l) => l !== label) : [...prev, label],
-                  )
-                }
-                className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full shrink-0 text-xs font-medium transition-colors ${
-                  active
-                    ? "bg-blue-600 text-white dark:bg-blue-500"
-                    : "bg-gray-100 text-gray-700 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600"
-                }`}
-              >
-                {label}
-                {active && (
-                  <span className="ml-0.5 text-blue-200" aria-hidden="true">×</span>
-                )}
-              </button>
-            );
-          })}
+          {groupedLabels.map(({ prefix, labels }, gi) => (
+            <React.Fragment key={prefix || '__other__'}>
+              {gi > 0 && <span className="w-px h-4 bg-gray-300 dark:bg-gray-600 shrink-0" aria-hidden="true" />}
+              {prefix && (
+                <span className="text-[10px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider shrink-0">{prefix}</span>
+              )}
+              {labels.map((label) => {
+                const active = labelFilter.includes(label);
+                const display = prefix ? label.slice(prefix.length + 1) : label;
+                return (
+                  <button
+                    key={label}
+                    type="button"
+                    onClick={() =>
+                      setLabelFilter((prev) =>
+                        active ? prev.filter((l) => l !== label) : [...prev, label],
+                      )
+                    }
+                    className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full shrink-0 text-xs font-medium transition-colors ${
+                      active
+                        ? "bg-blue-600 text-white dark:bg-blue-500"
+                        : "bg-gray-100 text-gray-700 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600"
+                    }`}
+                  >
+                    {display}
+                    {active && (
+                      <span className="ml-0.5 text-blue-200" aria-hidden="true">×</span>
+                    )}
+                  </button>
+                );
+              })}
+            </React.Fragment>
+          ))}
           {labelFilter.length > 0 && (
             <button
               type="button"
