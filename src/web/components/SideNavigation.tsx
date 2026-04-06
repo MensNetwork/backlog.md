@@ -135,6 +135,11 @@ const Icons = {
 			<path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
 		</svg>
 	),
+	Inbox: () => (
+		<svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+			<path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+		</svg>
+	),
 	Milestone: () => (
 		<svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 			<circle cx="12" cy="12" r="9" strokeWidth={2} />
@@ -188,6 +193,7 @@ const SideNavigation = memo(function SideNavigation({
 		return decisions.length > 6;
 	});
 	const [version, setVersion] = useState<string>('');
+	const [inboxUnreadCount, setInboxUnreadCount] = useState<number>(0);
 	const location = useLocation();
 	const navigate = useNavigate();
 
@@ -208,6 +214,22 @@ const SideNavigation = memo(function SideNavigation({
 	useEffect(() => {
 		getWebVersion().then(setVersion).catch(() => setVersion(''));
 	}, []);
+
+	// Fetch inbox unread count on mount and when navigating away from inbox
+	useEffect(() => {
+		let cancelled = false;
+		const fetchCount = async () => {
+			try {
+				const result = await apiClient.fetchInbox();
+				if (!cancelled) setInboxUnreadCount(result.unreadCount);
+			} catch {
+				// silently fail — inbox may not be available
+			}
+		};
+		fetchCount();
+		// Re-poll when leaving the inbox page so badge stays current
+		return () => { cancelled = true; };
+	}, [location.pathname]);
 
 	// Save docs collapse state to localStorage
 	useEffect(() => {
@@ -564,6 +586,26 @@ const SideNavigation = memo(function SideNavigation({
 							<Icons.Statistics />
 							<span className="ml-3 text-sm font-medium">Statistics</span>
 						</NavLink>
+
+						{/* Inbox Navigation */}
+						<NavLink
+							to="/inbox"
+							className={({ isActive }) =>
+								`flex items-center px-3 py-2 rounded-lg transition-colors duration-200 ${
+									isActive
+										? 'bg-blue-50 dark:bg-blue-600/20 text-blue-600 dark:text-blue-400 font-medium'
+										: 'text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 hover:text-gray-900 dark:hover:text-gray-100'
+								}`
+							}
+						>
+							<Icons.Inbox />
+							<span className="ml-3 text-sm font-medium">Inbox</span>
+							{inboxUnreadCount > 0 && (
+								<span className="ml-auto text-xs font-semibold bg-blue-600 text-white rounded-full px-2 py-0.5 min-w-[1.25rem] text-center">
+									{inboxUnreadCount}
+								</span>
+							)}
+						</NavLink>
 					</div>
 				)}
 
@@ -770,6 +812,28 @@ const SideNavigation = memo(function SideNavigation({
 							<div className="w-6 h-6 flex items-center justify-center">
 								<Icons.Statistics />
 							</div>
+						</NavLink>
+						{/* Inbox Navigation (collapsed) */}
+						<NavLink
+							to="/inbox"
+							data-tooltip-id="sidebar-tooltip"
+							data-tooltip-content={inboxUnreadCount > 0 ? `Inbox (${inboxUnreadCount} unread)` : "Inbox"}
+							className={({ isActive }) =>
+								`relative flex items-center justify-center p-3 rounded-md transition-colors duration-200 ${
+									isActive
+										? 'bg-blue-50 dark:bg-blue-600/20 text-blue-700 dark:text-blue-400'
+										: 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 hover:text-gray-900 dark:hover:text-gray-100'
+								}`
+							}
+						>
+							<div className="w-6 h-6 flex items-center justify-center">
+								<Icons.Inbox />
+							</div>
+							{inboxUnreadCount > 0 && (
+								<span className="absolute top-1 right-1 w-4 h-4 flex items-center justify-center text-[9px] font-bold bg-blue-600 text-white rounded-full">
+									{inboxUnreadCount > 9 ? "9+" : inboxUnreadCount}
+								</span>
+							)}
 						</NavLink>
 						<button
 							onClick={() => {

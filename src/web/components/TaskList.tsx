@@ -7,7 +7,7 @@ import type {
 	Task,
 	TaskSearchResult,
 } from "../../types";
-import { collectAvailableLabels } from "../../utils/label-filter.ts";
+import { collectAvailableLabels, sortLabelsByGroup } from "../../utils/label-filter.ts";
 import { collectArchivedMilestoneKeys, getMilestoneLabel, milestoneKey } from "../utils/milestones";
 import { formatStoredUtcDateForCompactDisplay, parseStoredUtcDate } from "../utils/date-display";
 import CleanupModal from "./CleanupModal";
@@ -249,7 +249,7 @@ const TaskList: React.FC<TaskListProps> = ({
 
 	const sortedBaseTasks = useMemo(() => sortTasksByIdDescending(tasks), [tasks]);
 	const mergedAvailableLabels = useMemo(
-		() => collectAvailableLabels(tasks, availableLabels),
+		() => sortLabelsByGroup(collectAvailableLabels(tasks, availableLabels)),
 		[tasks, availableLabels],
 	);
 	const milestoneOptions = useMemo(() => {
