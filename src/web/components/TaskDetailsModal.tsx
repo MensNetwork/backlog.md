@@ -9,6 +9,7 @@ import MermaidMarkdown from './MermaidMarkdown';
 import ChipInput from "./ChipInput";
 import DependencyInput from "./DependencyInput";
 import { formatStoredUtcDateForDisplay } from "../utils/date-display";
+import { sortLabelsByGroup } from "../../utils/label-filter";
 
 interface Props {
   task?: Task; // Optional for create mode
@@ -1004,6 +1005,7 @@ export const TaskDetailsModal: React.FC<Props> = ({
               onChange={(value) => handleInlineMetaUpdate({ labels: value })}
               placeholder="Type label and press Enter or comma"
               disabled={isFromOtherBranch}
+              suggestions={sortLabelsByGroup(availableLabels ?? [])}
             />
           </div>
 

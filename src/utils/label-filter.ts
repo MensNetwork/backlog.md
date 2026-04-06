@@ -59,3 +59,23 @@ export function formatLabelSummary(selected: string[]): string {
 export function labelsToLower(labels: string[]): string[] {
 	return labels.map(normalizeLabel).filter((label) => label.length > 0);
 }
+
+const LABEL_GROUP_PRIORITY: Record<string, number> = { dept: 0, type: 1, module: 2 };
+
+/**
+ * Sort labels by group prefix (dept > type > module > other),
+ * then alphabetically within each group.
+ */
+export function sortLabelsByGroup(labels: string[]): string[] {
+	return labels.slice().sort((a, b) => {
+		const aColon = a.indexOf(":");
+		const bColon = b.indexOf(":");
+		const aPrefix = aColon > 0 ? a.slice(0, aColon) : "";
+		const bPrefix = bColon > 0 ? b.slice(0, bColon) : "";
+		const ap = LABEL_GROUP_PRIORITY[aPrefix] ?? 99;
+		const bp = LABEL_GROUP_PRIORITY[bPrefix] ?? 99;
+		if (ap !== bp) return ap - bp;
+		if (aPrefix !== bPrefix) return aPrefix.localeCompare(bPrefix);
+		return a.localeCompare(b);
+	});
+}
