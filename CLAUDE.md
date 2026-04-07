@@ -99,15 +99,15 @@ Create the directory when the first decision is needed.
 
 ## Deployment
 
-After any PR is merged to main and Paul confirms the change:
+Full deployment reference: `docs/DEPLOYMENT.md`
 
-1. Build: `bun run build` produces `dist/backlog`
-2. **Test and confirm locally** — start the UI (`bun run cli browser`), verify the changes work as expected on psydell
-3. Paul confirms the build is good
-4. Deploy `dist/backlog` to **mn-cfo machine**
-5. Only after deployment to mn-cfo can Shenny access at `shenny.mensnetwork.global` be tested
+mn-cfo is ARM64 — cross-compile required, not a standard `bun run build`. Key steps:
 
-**AC #5 cannot be marked done without confirming deployment to mn-cfo.** Do not assume it has happened — ask Paul to confirm or trigger it.
+1. Build ARM64 binary: `bun build --target=bun-linux-arm64 --outfile=dist/backlog-arm64 ...`
+2. `scp dist/backlog-arm64 mn-cfo:/tmp/backlog-new`
+3. `ssh mn-cfo 'sudo mv /tmp/backlog-new /usr/local/bin/backlog && systemctl --user restart backlog-browser'`
+
+Production URL: `https://tasks.mensnetwork.global` (Google OAuth, @mensnetwork.global only)
 
 ## Session End
 
