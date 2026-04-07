@@ -4,6 +4,7 @@ import { apiClient, type ReorderTaskPayload } from '../lib/api';
 import { buildLanes, DEFAULT_LANE_KEY, groupTasksByLaneAndStatus, type LaneMode } from '../lib/lanes';
 import { collectArchivedMilestoneKeys, milestoneKey } from '../utils/milestones';
 import { collectAvailableLabels } from '../../utils/label-filter';
+import { getDeptLabelColour } from '../utils/label-colours';
 import TaskColumn from './TaskColumn';
 import CleanupModal from './CleanupModal';
 import { SuccessToast } from './SuccessToast';
@@ -515,6 +516,12 @@ const Board: React.FC<BoardProps> = ({
               {labels.map((label) => {
                 const active = labelFilter.includes(label);
                 const display = prefix ? label.slice(prefix.length + 1) : label;
+                const colour = getDeptLabelColour(label);
+                const style = colour
+                  ? active
+                    ? { backgroundColor: colour.activeBg, color: colour.activeText, border: `1px solid ${colour.border}` }
+                    : { backgroundColor: colour.bg, color: colour.text, border: `1px solid ${colour.border}` }
+                  : undefined;
                 return (
                   <button
                     key={label}
@@ -525,14 +532,17 @@ const Board: React.FC<BoardProps> = ({
                       )
                     }
                     className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full shrink-0 text-xs font-medium transition-colors ${
-                      active
-                        ? "bg-blue-600 text-white dark:bg-blue-500"
-                        : "bg-gray-100 text-gray-700 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600"
+                      colour
+                        ? ""
+                        : active
+                          ? "bg-blue-600 text-white dark:bg-blue-500"
+                          : "bg-gray-100 text-gray-700 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600"
                     }`}
+                    style={style}
                   >
                     {display}
                     {active && (
-                      <span className="ml-0.5 text-blue-200" aria-hidden="true">×</span>
+                      <span className="ml-0.5 opacity-70" aria-hidden="true">×</span>
                     )}
                   </button>
                 );
