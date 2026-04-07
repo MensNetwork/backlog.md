@@ -1021,7 +1021,6 @@ export const TaskDetailsModal: React.FC<Props> = ({
               value={labels}
               onChange={(value) => handleInlineMetaUpdate({ labels: value })}
               placeholder="Type label and press Enter or comma"
-              suggestions={availableLabels}
               disabled={isFromOtherBranch}
               suggestions={sortLabelsByGroup(availableLabels ?? [])}
             />

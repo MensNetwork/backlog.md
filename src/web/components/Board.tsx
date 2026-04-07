@@ -215,7 +215,7 @@ const Board: React.FC<BoardProps> = ({
 
   const PRIORITY_RANK: Record<string, number> = { high: 0, medium: 1, low: 2 };
 
-  // Filter tasks: always exclude subtasks; apply milestone, label, and active-only filters
+  // Filter tasks: exclude subtasks from board view; apply milestone, label, and active-only filters
   const filteredTasks = useMemo(() => {
     let result = tasks.filter(task => !task.parentTaskId);
     if (showActiveOnly) {
@@ -305,7 +305,7 @@ const Board: React.FC<BoardProps> = ({
     });
   }, [tasks, archivedMilestoneIds, milestoneAliasToCanonical]);
 
-  // Always group from filteredTasks (subtasks excluded, active-only applied)
+  // Group filtered tasks (subtasks excluded) by lane and status
   const tasksByLane = useMemo(
     () => groupTasksByLaneAndStatus(laneMode, lanes, statuses, filteredTasks, {
       archivedMilestoneIds,

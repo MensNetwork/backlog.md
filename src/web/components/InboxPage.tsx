@@ -1,11 +1,11 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import { apiClient, type InboxMessage, type InboxListResponse } from "../lib/api";
 import MermaidMarkdown from "./MermaidMarkdown";
 
 // ---- Colour scheme per directive ----
 const DEPT_COLOURS: Record<string, { bg: string; text: string; border: string }> = {
-	CEO: { bg: "#1e3a2f", text: "#4ade80", border: "#4ade8033" },
-	CTO: { bg: "#1e2d4a", text: "#60a5fa", border: "#60a5fa33" },
+	CEO: { bg: "#1e2d4a", text: "#60a5fa", border: "#60a5fa33" },
+	CTO: { bg: "#1e3a2f", text: "#4ade80", border: "#4ade8033" },
 	CMO: { bg: "#2d1e4a", text: "#c084fc", border: "#c084fc33" },
 	CFO: { bg: "#3a2a1e", text: "#fb923c", border: "#fb923c33" },
 };
@@ -54,10 +54,12 @@ function DeptBadge({ msg }: { msg: InboxMessage }) {
 function MessageItem({
 	msg,
 	isSelected,
+	isRead,
 	onClick,
 }: {
 	msg: InboxMessage;
 	isSelected: boolean;
+	isRead: boolean;
 	onClick: () => void;
 }) {
 	return (
@@ -72,7 +74,7 @@ function MessageItem({
 		>
 			<div className="flex items-center gap-2 mb-1">
 				{/* Unread dot */}
-				{!msg.isProcessed ? (
+				{!msg.isProcessed && !isRead ? (
 					<span className="w-2 h-2 rounded-full bg-blue-400 flex-shrink-0" aria-label="Unread" />
 				) : (
 					<span className="w-2 h-2 rounded-full bg-transparent flex-shrink-0" />
@@ -87,7 +89,7 @@ function MessageItem({
 			</div>
 			<div
 				className={`text-sm leading-snug mb-1 truncate ${
-					!msg.isProcessed ? "font-semibold text-gray-100" : "font-normal text-gray-400"
+					!msg.isProcessed && !isRead ? "font-semibold text-gray-100" : "font-normal text-gray-400"
 				}`}
 			>
 				{msg.title}
@@ -111,7 +113,18 @@ export default function InboxPage() {
 	// Filters
 	const [deptFilter, setDeptFilter] = useState<string>("All");
 	const [moduleFilter, setModuleFilter] = useState<string | null>(null);
-	const [unreadOnly, setUnreadOnly] = useState(false);
+	const [showArchived, setShowArchived] = useState(false);
+
+	// Read state (persisted to localStorage)
+	const [readIds, setReadIds] = useState<Set<string>>(() => {
+		try {
+			const stored = localStorage.getItem("backlog:inbox:read");
+			return stored ? new Set<string>(JSON.parse(stored)) : new Set<string>();
+		} catch {
+			return new Set<string>();
+		}
+	});
+	const autoReadTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
 	// Selection + detail
 	const [selectedMsg, setSelectedMsg] = useState<InboxMessage | null>(null);
@@ -137,6 +150,40 @@ export default function InboxPage() {
 	useEffect(() => {
 		loadInbox();
 	}, [loadInbox]);
+
+	// Persist readIds to localStorage
+	useEffect(() => {
+		try {
+			localStorage.setItem("backlog:inbox:read", JSON.stringify([...readIds]));
+		} catch {}
+	}, [readIds]);
+
+	// Auto-mark as read after 5 seconds of viewing
+	useEffect(() => {
+		if (autoReadTimer.current) clearTimeout(autoReadTimer.current);
+		if (selectedMsg && !readIds.has(selectedMsg.id)) {
+			autoReadTimer.current = setTimeout(() => {
+				setReadIds((prev) => new Set([...prev, selectedMsg.id]));
+			}, 5000);
+		}
+		return () => {
+			if (autoReadTimer.current) clearTimeout(autoReadTimer.current);
+		};
+	// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [selectedMsg]);
+
+	const toggleRead = useCallback(() => {
+		if (!selectedMsg) return;
+		setReadIds((prev) => {
+			const next = new Set(prev);
+			if (next.has(selectedMsg.id)) {
+				next.delete(selectedMsg.id);
+			} else {
+				next.add(selectedMsg.id);
+			}
+			return next;
+		});
+	}, [selectedMsg]);
 
 	// Load message content when selection changes
 	useEffect(() => {
@@ -189,7 +236,7 @@ export default function InboxPage() {
 	const filteredMessages = React.useMemo(() => {
 		if (!data) return [];
 		return data.messages.filter((msg) => {
-			if (unreadOnly && msg.isProcessed) return false;
+			if (!showArchived && msg.isProcessed) return false;
 			if (deptFilter !== "All") {
 				if (msg.isModule) return false;
 				if (msg.dept?.toUpperCase() !== deptFilter) return false;
@@ -200,9 +247,9 @@ export default function InboxPage() {
 			}
 			return true;
 		});
-	}, [data, deptFilter, moduleFilter, unreadOnly]);
+	}, [data, deptFilter, moduleFilter, showArchived]);
 
-	const unreadCount = data?.unreadCount ?? 0;
+	const unreadCount = (data?.messages ?? []).filter((m) => !m.isProcessed && !readIds.has(m.id)).length;
 	const modules = data?.modules ?? [];
 
 	const deptTabs = ["All", "CEO", "CTO", "CMO", "CFO"];
@@ -303,11 +350,11 @@ export default function InboxPage() {
 				<label className="flex items-center gap-2 text-xs text-gray-400 cursor-pointer select-none">
 					<input
 						type="checkbox"
-						checked={unreadOnly}
-						onChange={(e) => setUnreadOnly(e.target.checked)}
+						checked={showArchived}
+						onChange={(e) => setShowArchived(e.target.checked)}
 						className="rounded border-gray-600 bg-gray-800 text-blue-500 focus:ring-blue-500 focus:ring-offset-gray-900"
 					/>
-					Unread only
+					Show archived
 				</label>
 
 				{/* Unread count badge */}
@@ -324,7 +371,7 @@ export default function InboxPage() {
 				<div className="w-80 min-w-80 flex-shrink-0 border-r border-gray-700 overflow-y-auto bg-gray-900">
 					{filteredMessages.length === 0 ? (
 						<div className="p-6 text-center text-gray-500 text-sm">
-							{unreadOnly ? "No unread messages" : "No messages"}
+							{"No messages"}
 						</div>
 					) : (
 						filteredMessages.map((msg) => (
@@ -332,6 +379,7 @@ export default function InboxPage() {
 								key={msg.id}
 								msg={msg}
 								isSelected={selectedMsg?.id === msg.id}
+								isRead={readIds.has(msg.id)}
 								onClick={() => setSelectedMsg(msg)}
 							/>
 						))
@@ -349,13 +397,13 @@ export default function InboxPage() {
 										{selectedMsg.title}
 									</h2>
 									<div className="flex items-center gap-2 flex-shrink-0">
-										{/* Reply button — stub */}
+										{/* Read/unread toggle */}
 										<button
 											type="button"
-											onClick={() => console.log("Reply stub — not implemented")}
+											onClick={toggleRead}
 											className="px-3 py-1.5 text-xs font-medium text-gray-400 border border-gray-600 rounded hover:bg-gray-800 transition-colors"
 										>
-											Reply
+											{readIds.has(selectedMsg.id) ? "Mark unread" : "Mark read"}
 										</button>
 										{/* Archive button */}
 										{!selectedMsg.isProcessed && (
